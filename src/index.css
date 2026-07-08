@@ -1,0 +1,62 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #F7F8FC;
+  --white: #FFFFFF;
+  --card: #FFFFFF;
+  --card2: #F3F4F8;
+  --border: #E4E7EF;
+  --border2: #C9CDD8;
+  --text: #111827;
+  --muted: #6B7280;
+  --muted2: #9CA3AF;
+  --shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.06);
+
+  /* algorithm accent colors */
+  --rr:   #6366F1; --rr-bg:   #EEF2FF; --rr-border:   #C7D2FE;
+  --wrr:  #0891B2; --wrr-bg:  #ECFEFF; --wrr-border:  #A5F3FC;
+  --lc:   #059669; --lc-bg:   #ECFDF5; --lc-border:   #6EE7B7;
+  --ih:   #D97706; --ih-bg:   #FFFBEB; --ih-border:   #FCD34D;
+  --rnd:  #7C3AED; --rnd-bg:  #F5F3FF; --rnd-border:  #DDD6FE;
+
+  --hit: #059669; --miss: #DC2626;
+  --font-d: 'Space Grotesk', system-ui, sans-serif;
+  --font-b: 'Inter', system-ui, sans-serif;
+  --font-m: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+body {
+  background: var(--bg); color: var(--text);
+  font-family: var(--font-b); -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--card2); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+@keyframes request-fly {
+  0%   { opacity: 0; transform: translateX(-24px) scale(0.8); }
+  15%  { opacity: 1; transform: translateX(0) scale(1); }
+  85%  { opacity: 1; transform: translateX(0) scale(1); }
+  100% { opacity: 0; transform: translateX(8px) scale(0.9); }
+}
+@keyframes server-pulse {
+  0%  { transform: scale(1); }
+  40% { transform: scale(1.06); }
+  100%{ transform: scale(1); }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes bar-grow {
+  from { width: 0; }
+}
+@keyframes badge-pop {
+  0%   { transform: scale(0.5); opacity: 0; }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
