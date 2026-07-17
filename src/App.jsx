@@ -68,21 +68,31 @@ export default function App() {
 
     const reqId = Date.now() + Math.random()
     setFlyingReqs(prev => [...prev, { id: reqId, serverId: target.id, ip }])
+
+    // Hold the connection open for a time proportional to THIS server's latency,
+    // normalized to the dispatch interval. Slower servers keep connections open
+    // longer, so multiple connections overlap and active-connection counts
+    // actually differ between servers. This is what makes Least Connections
+    // behave correctly: faster servers free up sooner and receive more traffic.
+    const lats = stateRef.current.servers.map(s => s.latency || 100)
+    const avgLat = lats.reduce((a, b) => a + b, 0) / (lats.length || 1)
+    const holdMs = Math.max(300, speed * ((target.latency || 100) / avgLat) * 1.8)
+
     setTimeout(() => {
       setFlyingReqs(prev => prev.filter(r => r.id !== reqId))
-      // simulate request completion — decrement active connections
+      // request completes: free the connection on the real server AND in the UI stats
       if (stateRef.current) {
         const s = stateRef.current.servers.find(x => x.id === target.id)
         if (s) s.activeConnections = Math.max(0, s.activeConnections - 1)
-        setServerStats(prev => ({
-          ...prev,
-          [target.id]: {
-            requests: (prev[target.id]?.requests || 0) + 1,
-            activeConnections: Math.max(0, (prev[target.id]?.activeConnections || 0)),
-          }
-        }))
       }
-    }, Math.min(speed * 0.8, 600))
+      setServerStats(prev => ({
+        ...prev,
+        [target.id]: {
+          requests: (prev[target.id]?.requests || 0) + 1,
+          activeConnections: Math.max(0, (prev[target.id]?.activeConnections || 1) - 1),
+        }
+      }))
+    }, holdMs)
 
     setServerStats(prev => ({
       ...prev,
@@ -356,7 +366,7 @@ export default function App() {
                   {SAMPLE_IPS.map(ip => {
                     const hash = (() => {
                       let h = 2166136261
-                      for (let i = 0; i < ip.length; i++) { h ^= ip.charCodeAt(i); h = (h * 16777619) >>> 0 }
+                      for (let i = 0; i < ip.length; i++) { h ^= ip.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
                       return h
                     })()
                     const sIdx = hash % servers.length
