@@ -36,43 +36,36 @@ export class RoundRobin {
 export class WeightedRoundRobin {
   constructor(servers) {
     this.servers = [...servers]
-    this.currentIndex = -1
-    this.currentWeight = 0
+    // Nginx "smooth" WRR: each server keeps an effective current weight.
+    this.cw = new Map(this.servers.map(s => [s.id, 0]))
     this.requestCount = 0
-  }
-
-  _gcd(a, b) { return b === 0 ? a : this._gcd(b, a % b) }
-
-  _maxWeight() { return Math.max(...this.servers.map(s => s.weight || 1)) }
-
-  _gcdWeight() {
-    return this.servers.reduce((g, s) => this._gcd(g, s.weight || 1), this.servers[0]?.weight || 1)
   }
 
   nextServer(request) {
     if (this.servers.length === 0) return null
-    // Nginx-style weighted round robin
-    while (true) {
-      this.currentIndex = (this.currentIndex + 1) % this.servers.length
-      if (this.currentIndex === 0) {
-        this.currentWeight -= this._gcdWeight()
-        if (this.currentWeight <= 0) {
-          this.currentWeight = this._maxWeight()
-          if (this.currentWeight === 0) return null
-        }
-      }
-      const server = this.servers[this.currentIndex]
-      if ((server.weight || 1) >= this.currentWeight) {
-        this.requestCount++
-        server.requests++
-        server.activeConnections++
-        return server
-      }
+    const total = this.servers.reduce((t, s) => t + (s.weight || 1), 0)
+    if (total === 0) return null
+
+    // Smooth weighted round robin (same algorithm Nginx uses):
+    // 1) add each server's weight to its current weight
+    // 2) pick the server with the highest current weight
+    // 3) subtract the total weight from the chosen server
+    let best = null
+    for (const s of this.servers) {
+      const cw = (this.cw.get(s.id) || 0) + (s.weight || 1)
+      this.cw.set(s.id, cw)
+      if (best === null || cw > this.cw.get(best.id)) best = s
     }
+    this.cw.set(best.id, this.cw.get(best.id) - total)
+
+    this.requestCount++
+    best.requests++
+    best.activeConnections++
+    return best
   }
 
-  addServer(server) { this.servers.push(server); this.currentIndex = -1; this.currentWeight = 0 }
-  removeServer(id) { this.servers = this.servers.filter(s => s.id !== id); this.currentIndex = -1; this.currentWeight = 0 }
+  addServer(server) { this.servers.push(server); this.cw.set(server.id, 0) }
+  removeServer(id) { this.servers = this.servers.filter(s => s.id !== id); this.cw.delete(id) }
 }
 
 // ─── Least Connections ───────────────────────────────────────────────────────
@@ -87,10 +80,13 @@ export class LeastConnections {
 
   nextServer(request) {
     if (this.servers.length === 0) return null
-    // Find server with minimum active connections
-    const server = this.servers.reduce((min, s) =>
-      s.activeConnections < min.activeConnections ? s : min
-    )
+    // Route to the server with the fewest active connections. Break ties
+    // randomly among the least-loaded servers. This avoids positional bias
+    // toward the first server and lets the algorithm naturally favor faster
+    // servers, which free their connections sooner and so stay less loaded.
+    const min = Math.min(...this.servers.map(s => s.activeConnections))
+    const candidates = this.servers.filter(s => s.activeConnections === min)
+    const server = candidates[Math.floor(Math.random() * candidates.length)]
     this.requestCount++
     server.requests++
     server.activeConnections++
@@ -112,11 +108,12 @@ export class IPHash {
   }
 
   _hash(ip) {
-    // FNV-1a hash — same as used in Nginx
+    // FNV-1a hash. Must use Math.imul for a true 32-bit multiply — a plain
+    // h * 16777619 overflows 2^53 and loses precision, corrupting the hash.
     let h = 2166136261
     for (let i = 0; i < ip.length; i++) {
       h ^= ip.charCodeAt(i)
-      h = (h * 16777619) >>> 0
+      h = Math.imul(h, 16777619) >>> 0
     }
     return h
   }
