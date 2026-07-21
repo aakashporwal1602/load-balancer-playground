@@ -41,23 +41,26 @@ export default function App() {
   const [serverStats, setServerStats] = useState({})
 
   const stateRef = useRef(null)
+  const genRef = useRef(0)   // bumps on every reset so stale timers can be ignored
 
   const resetSim = useCallback((newAlgo = algo, newServers = servers) => {
     setRunning(false)
     setTick(0); setLog([]); setActiveServer(null); setFlyingReqs([])
     ipIdx = 0
-    const { servers: sv } = buildBalancer(newAlgo, newServers)
+    genRef.current++          // invalidate any in-flight completion timers from the old run
+    const built = buildBalancer(newAlgo, newServers)
     const stats = {}
-    sv.forEach(s => { stats[s.id] = { requests: 0, activeConnections: 0 } })
+    built.servers.forEach(s => { stats[s.id] = { requests: 0, activeConnections: 0 } })
     setServerStats(stats)
-    stateRef.current = buildBalancer(newAlgo, newServers)
+    stateRef.current = built
   }, [algo, servers])
 
   useEffect(() => { resetSim(algo, servers) }, [])
 
   const step = useCallback(() => {
     if (!stateRef.current) return
-    const { balancer, servers: sv } = stateRef.current
+    const gen = genRef.current
+    const { balancer } = stateRef.current
     const ip = SAMPLE_IPS[ipIdx % SAMPLE_IPS.length]
     ipIdx++
     const target = balancer.nextServer({ ip })
@@ -69,38 +72,39 @@ export default function App() {
     const reqId = Date.now() + Math.random()
     setFlyingReqs(prev => [...prev, { id: reqId, serverId: target.id, ip }])
 
+    // Count the request the moment it is routed and open a connection, so the
+    // distribution bars react immediately (not only when the request finishes).
+    setServerStats(prev => ({
+      ...prev,
+      [target.id]: {
+        requests: (prev[target.id]?.requests || 0) + 1,
+        activeConnections: (prev[target.id]?.activeConnections || 0) + 1,
+      }
+    }))
+
     // Hold the connection open for a time proportional to THIS server's latency,
     // normalized to the dispatch interval. Slower servers keep connections open
-    // longer, so multiple connections overlap and active-connection counts
-    // actually differ between servers. This is what makes Least Connections
-    // behave correctly: faster servers free up sooner and receive more traffic.
+    // longer, so active-connection counts actually differ between servers — which
+    // is what makes Least Connections behave correctly: faster servers free up
+    // sooner and therefore receive more traffic.
     const lats = stateRef.current.servers.map(s => s.latency || 100)
     const avgLat = lats.reduce((a, b) => a + b, 0) / (lats.length || 1)
     const holdMs = Math.max(300, speed * ((target.latency || 100) / avgLat) * 1.8)
 
     setTimeout(() => {
       setFlyingReqs(prev => prev.filter(r => r.id !== reqId))
-      // request completes: free the connection on the real server AND in the UI stats
-      if (stateRef.current) {
-        const s = stateRef.current.servers.find(x => x.id === target.id)
-        if (s) s.activeConnections = Math.max(0, s.activeConnections - 1)
-      }
+      if (genRef.current !== gen) return   // sim was reset/changed: ignore this stale timer
+      // request completes: free the connection on the real server AND in the UI
+      const s = stateRef.current?.servers.find(x => x.id === target.id)
+      if (s) s.activeConnections = Math.max(0, s.activeConnections - 1)
       setServerStats(prev => ({
         ...prev,
         [target.id]: {
-          requests: (prev[target.id]?.requests || 0) + 1,
+          requests: prev[target.id]?.requests || 0,
           activeConnections: Math.max(0, (prev[target.id]?.activeConnections || 1) - 1),
         }
       }))
     }, holdMs)
-
-    setServerStats(prev => ({
-      ...prev,
-      [target.id]: {
-        requests: (prev[target.id]?.requests || 0),
-        activeConnections: (prev[target.id]?.activeConnections || 0) + 1,
-      }
-    }))
 
     setLog(prev => [{
       id: reqId, ip, serverId: target.id, t: Date.now(),
@@ -130,6 +134,12 @@ export default function App() {
   const updateLatency = (id, l) => {
     const updated = servers.map(s => s.id === id ? { ...s, latency: l } : s)
     setServers(updated)
+    // Apply live to the running simulation (without wiping stats), so latency
+    // changes take effect immediately — essential for the Least Connections demo.
+    if (stateRef.current) {
+      const s = stateRef.current.servers.find(x => x.id === id)
+      if (s) s.latency = l
+    }
   }
 
   const addServer = () => {
